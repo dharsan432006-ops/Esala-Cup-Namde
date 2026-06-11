@@ -3,9 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import "dotenv/config";
 import express from "express";
 import { createServer } from "http";
 import { Server } from "socket.io";
+import { GoogleGenAI } from "@google/genai";
 // Use dynamic import for Vite in dev mode
 import path from "path";
 import fs from "fs";
@@ -28,6 +30,8 @@ import { simulateCricketMatch, calculateUpdatedPointsTable, fillAndGetPlayingXI,
 
 const app = express();
 app.use(express.json());
+
+const genAI = process.env.GEMINI_API_KEY ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY }) : null;
 
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
@@ -99,6 +103,43 @@ let importStatus = {
 };
 
 // API ENDPOINTS
+
+// ------------------- AI CAPABILITIES APIs -------------------
+app.post("/api/ai/scout", async (req, res) => {
+  const { player } = req.body;
+  if (!player) return res.status(400).json({ error: "Player data required" });
+
+  if (!genAI) {
+    return res.json({
+      report: `Scouting Report for ${player.name}: Professional analysis is currently unavailable as the Gemini AI engine is not configured. Based on raw statistics, this ${player.role} with a rating of ${player.rating}/99 is considered a ${player.rating > 85 ? 'top-tier marquee asset' : 'reliable squad member'}.`
+    });
+  }
+
+  try {
+    const prompt = `Act as a professional IPL cricket scout. Generate a highly professional, 2-paragraph scouting report for a player with the following profile:
+    Name: ${player.name}
+    Role: ${player.role}
+    Nationality: ${player.nationality}
+    Overall Rating: ${player.rating}/99
+    Batting Rating: ${player.battingRating}/99
+    Bowling Rating: ${player.bowlingRating}/99
+
+    Paragraph 1 should focus on their technical strengths and tactical utility.
+    Paragraph 2 should focus on their market value and projected impact in a high-pressure T20 tournament.
+    Keep the tone realistic, analytical, and engaging. Return only the report text.`;
+
+    const result = await genAI.models.generateContent({
+      model: "gemini-1.5-flash",
+      contents: [{ role: "user", parts: [{ text: prompt }] }]
+    });
+
+    const report = result.text || "Failed to generate report.";
+    res.json({ report });
+  } catch (err) {
+    console.error("AI Scout Error:", err);
+    res.status(500).json({ error: "AI Scouting engine encountered an error." });
+  }
+});
 
 // ------------------- HISTORICAL DATA APIs -------------------
 app.post("/api/admin/import/ipl-history", (req, res) => {
@@ -1042,9 +1083,60 @@ app.get("/api/simulation/:roomCode/results", (req, res) => {
   const champion = finalMatch?.winner || null;
   const runnerUp = champion ? (finalMatch.teamA === champion ? finalMatch.teamB : finalMatch.teamA) : null;
 
+  // Compute Dream XI from all matches
+  const playerStats: { [name: string]: { runs: number, wickets: number, matches: number, balls: number, dots: number, fours: number, sixes: number, role: string, team: string } } = {};
+
+  room.simulatedMatches.forEach((m: any) => {
+    if (!m.simulated || !m.scoreCard) return;
+
+    const processBatting = (bList: any[], team: string) => {
+      bList.forEach(b => {
+        if (!playerStats[b.playerName]) {
+          const p = INITIAL_PLAYERS.find(pl => pl.name === b.playerName);
+          playerStats[b.playerName] = { runs: 0, wickets: 0, matches: 0, balls: 0, dots: 0, fours: 0, sixes: 0, role: p?.role || "Batsman", team };
+        }
+        playerStats[b.playerName].runs += b.runs;
+        playerStats[b.playerName].balls += b.balls;
+        playerStats[b.playerName].fours += b.fours;
+        playerStats[b.playerName].sixes += b.sixes;
+        playerStats[b.playerName].matches += 1;
+      });
+    };
+
+    const processBowling = (wList: any[], team: string) => {
+      wList.forEach(w => {
+        if (!playerStats[w.playerName]) {
+          const p = INITIAL_PLAYERS.find(pl => pl.name === w.playerName);
+          playerStats[w.playerName] = { runs: 0, wickets: 0, matches: 0, balls: 0, dots: 0, fours: 0, sixes: 0, role: p?.role || "Bowler", team };
+        }
+        playerStats[w.playerName].wickets += w.wickets;
+      });
+    };
+
+    processBatting(m.scoreCard.firstInningsBatting || [], m.teamA);
+    processBatting(m.scoreCard.secondInningsBatting || [], m.teamB);
+    processBowling(m.scoreCard.firstInningsBowling || [], m.teamB);
+    processBowling(m.scoreCard.secondInningsBowling || [], m.teamA);
+  });
+
+  const sortedPlayers = Object.entries(playerStats).map(([name, s]) => ({
+    name,
+    ...s,
+    impactScore: s.runs + (s.wickets * 25) + (s.sixes * 2) + (s.runs > 0 ? (s.runs / s.balls * 10) : 0)
+  })).sort((a, b) => b.impactScore - a.impactScore);
+
+  // Select 1 Keeper, 4 Batters, 2 AR, 4 Bowlers
+  const dreamXI = [
+    ...sortedPlayers.filter(p => p.role === "Wicket-Keeper").slice(0, 1),
+    ...sortedPlayers.filter(p => p.role === "Batsman").slice(0, 4),
+    ...sortedPlayers.filter(p => p.role === "All-Rounder").slice(0, 2),
+    ...sortedPlayers.filter(p => p.role === "Bowler").slice(0, 4)
+  ];
+
   res.json({
     champion,
     runnerUp,
+    dreamXI,
     finalScorecard: finalMatch || null,
     totalMatchesSimulated: room.simulatedMatches.filter((m: any) => m.simulated).length
   });

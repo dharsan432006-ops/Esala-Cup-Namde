@@ -105,6 +105,8 @@ export default function App() {
   const [playerHistoryData, setPlayerHistoryData] = useState<any | null>(null);
   const [teamHistoryData, setTeamHistoryData] = useState<any | null>(null);
   const [browsingTeamCode, setBrowsingTeamCode] = useState<string | null>(null);
+  const [aiScoutLoading, setAiScoutLoading] = useState<string | null>(null);
+  const [aiReports, setAiReports] = useState<{ [playerId: string]: string }>({});
 
   // Feedback notifications
   const [errorToast, setErrorToast] = useState<string | null>(null);
@@ -745,6 +747,26 @@ export default function App() {
       }
     } catch {
       triggerError("Could not retrieve historical database charts.");
+    }
+  };
+
+  const handleFetchAiScout = async (player: any) => {
+    if (aiReports[player.id]) return;
+    setAiScoutLoading(player.id);
+    try {
+      const res = await fetch("/api/ai/scout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ player })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setAiReports(prev => ({ ...prev, [player.id]: data.report }));
+      }
+    } catch {
+      triggerError("AI Scouting engine connection failure.");
+    } finally {
+      setAiScoutLoading(null);
     }
   };
 
@@ -1444,16 +1466,39 @@ export default function App() {
                             DRAFT LOT NO. {roomData.currentPlayerIndex + 1}
                           </span>
 
-                          <div>
-                            <span className="bg-neutral-800 text-xs px-2.5 py-1 rounded font-bold text-neutral-300">
-                              {player.role}
-                            </span>
-                            <h3 className="text-3xl font-extrabold text-white mt-1.5 flex items-center gap-3">
-                              {player.name}
-                              <span className="text-xs text-neutral-400 font-normal">({player.nationality})</span>
-                            </h3>
+                          <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+                            <div>
+                              <span className="bg-neutral-800 text-xs px-2.5 py-1 rounded font-bold text-neutral-300">
+                                {player.role}
+                              </span>
+                              <h3 className="text-3xl font-extrabold text-white mt-1.5 flex items-center gap-3">
+                                {player.name}
+                                <span className="text-xs text-neutral-400 font-normal">({player.nationality})</span>
+                              </h3>
+                            </div>
+                            <button
+                              onClick={() => handleFetchAiScout(player)}
+                              disabled={aiScoutLoading === player.id}
+                              className="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 shadow-lg shadow-purple-900/20 transition-all disabled:opacity-50"
+                            >
+                              <Sparkles className={`w-3.5 h-3.5 ${aiScoutLoading === player.id ? 'animate-spin' : ''}`} />
+                              {aiReports[player.id] ? "REGENERATE SCOUT" : "AI SCOUT ANALYSIS"}
+                            </button>
                           </div>
                         </div>
+
+                        {/* AI SCOUT REPORT SECTION */}
+                        {aiReports[player.id] && (
+                          <div className="px-6 py-4 bg-purple-950/20 border-b border-purple-900/30 animate-fade-in">
+                            <div className="flex items-center gap-2 mb-2">
+                              <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+                              <span className="text-[10px] font-mono font-bold text-purple-400 uppercase tracking-widest">GEMINI AI SCOUTING REPORT</span>
+                            </div>
+                            <p className="text-[11px] leading-relaxed text-neutral-300 italic">
+                              "{aiReports[player.id]}"
+                            </p>
+                          </div>
+                        )}
 
                         {/* Player Historical stats banner */}
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 p-6 bg-neutral-950 border-y border-neutral-800 text-xs">
@@ -2356,6 +2401,39 @@ export default function App() {
                 Back To Main Menu
               </button>
             </div>
+
+            {/* DREAM XI SECTION */}
+            {finalResults?.dreamXI && (
+              <div className="bg-neutral-900 border border-neutral-800 p-6 rounded-3xl space-y-6">
+                <div className="flex items-center gap-3">
+                  <ShieldCheck className="w-8 h-8 text-[#FDD835]" />
+                  <div>
+                    <h3 className="text-2xl font-black text-white uppercase tracking-tight">OFFICIAL TEAM OF THE TOURNAMENT</h3>
+                    <p className="text-xs text-neutral-400">The most impactful players of the season across all franchises.</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  {finalResults.dreamXI.map((p: any, idx: number) => (
+                    <div key={idx} className="bg-neutral-950 p-4 rounded-2xl border border-neutral-800 flex flex-col justify-between space-y-3 hover:border-[#FF8220]/50 transition-colors">
+                      <div>
+                        <div className="flex justify-between items-start">
+                          <span className="text-[10px] font-mono text-[#FF8220] font-bold">{p.role.toUpperCase()}</span>
+                          <span className="bg-neutral-800 text-[10px] px-2 py-0.5 rounded text-neutral-400 font-bold">{p.team}</span>
+                        </div>
+                        <h4 className="font-extrabold text-white mt-1">{p.name}</h4>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 text-[10px] font-mono text-neutral-500 pt-2 border-t border-neutral-900">
+                        <div>RUNS: <span className="text-white font-bold">{p.runs}</span></div>
+                        <div>WKTS: <span className="text-white font-bold">{p.wickets}</span></div>
+                        <div>SR: <span className="text-white font-bold">{p.runs > 0 ? (p.runs / p.balls * 100).toFixed(1) : "0.0"}</span></div>
+                        <div>MTCH: <span className="text-white font-bold">{p.matches}</span></div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Awards listings */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
