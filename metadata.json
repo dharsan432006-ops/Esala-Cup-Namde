@@ -1,0 +1,6 @@
+{
+  "name": "Esala Cup Namde",
+  "description": "A complete professional IPL auction and tournament simulation web application featuring real-time multiplayer auctions, historical player databases, and an advanced cricket simulation engine.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
