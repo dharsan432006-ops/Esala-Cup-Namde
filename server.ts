@@ -26,9 +26,6 @@ import {
 import { INITIAL_PLAYERS, IPL_TEAMS, VENUES, HISTORICAL_SEASONS_DATA } from "./src/data/initialPlayers.js";
 import { simulateCricketMatch, calculateUpdatedPointsTable, fillAndGetPlayingXI, recalculateTeamStrength } from "./src/lib/simulationEngine.js";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
 const app = express();
 app.use(express.json());
 
@@ -41,11 +38,20 @@ const io = new Server(httpServer, {
 });
 
 const PORT = 3000;
-const DB_FILE = path.join(__dirname, "data", "database.json");
+// Use safe detection for ESM vs CJS environments
+const getDirname = () => {
+  try {
+    return path.dirname(fileURLToPath(import.meta.url));
+  } catch {
+    return __dirname;
+  }
+};
+const currentDir = getDirname();
+const DB_FILE = path.join(currentDir, "data", "database.json");
 
 // Ensure data directory exists
-if (!fs.existsSync(path.join(__dirname, "data"))) {
-  fs.mkdirSync(path.join(__dirname, "data"));
+if (!fs.existsSync(path.join(currentDir, "data"))) {
+  fs.mkdirSync(path.join(currentDir, "data"));
 }
 
 // In-Memory Database State
@@ -1204,7 +1210,7 @@ if (!isProd) {
         }
 
         try {
-          let template = fs.readFileSync(path.join(__dirname, "index.html"), "utf-8");
+          let template = fs.readFileSync(path.join(currentDir, "index.html"), "utf-8");
           template = await vite.transformIndexHtml(url, template);
           res.status(200).set({ "Content-Type": "text/html" }).end(template);
         } catch (e: any) {
@@ -1220,14 +1226,20 @@ if (!isProd) {
   });
 } else {
   // Serve static assets in PROD Mode
-  const distPath = path.join(__dirname, "dist");
+  // When bundled into dist/server.cjs, currentDir is actually the dist/ directory.
+  const distPath = currentDir;
   app.use(express.static(distPath));
   
   app.get("*", (req, res) => {
     if (req.originalUrl.startsWith("/api")) {
       return res.status(404).json({ error: "Endpoint not found" });
     }
-    res.sendFile(path.join(distPath, "index.html"));
+    const indexPath = path.join(distPath, "index.html");
+    if (fs.existsSync(indexPath)) {
+      res.sendFile(indexPath);
+    } else {
+      res.status(404).json({ error: "Frontend assets not found" });
+    }
   });
 
   httpServer.listen(PORT, "0.0.0.0", () => {
